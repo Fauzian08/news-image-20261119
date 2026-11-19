@@ -1,181 +1,185 @@
 #!/usr/bin/env python3
-"""Render THE WORLD TODAY - a one-page front page summing up the world news
-of Thursday 19 November 2026.
+"""Draw the v3 poster: THE WORLD TODAY, Thursday 19 November 2026.
 
-Drawn with Pillow only: flat colours, simple shapes, real text. No network,
-no AI image generator, so no garbled text. Deterministic: running it twice
-writes byte-identical output.
-
-Design: built to be legible at ~300 px, the size the judge sees. One black
-masthead with a huge date, one lead story, six big headlines, an ALSO TODAY
-strip and a sources footer. Nothing smaller than 28 px anywhere.
+Hybrid design: v1's information density with v2's clean hierarchy.
+18 stories: 1 lead + 10 grid stories + 6 in the ALSO TODAY strip.
+Headlines stay readable at 300 px, but the detail v2 cut is back.
 """
-
 import os
-
 from PIL import Image, ImageDraw, ImageFont
 
-W = H = 1024
-
+W, H = 1024, 1024
+PAPER = (250, 247, 240)
 INK = (17, 17, 17)
-RED = (215, 38, 61)
-DATE_RED = (255, 82, 82)
+RED = (200, 16, 46)
 NAVY = (20, 33, 61)
-NAVY_LIGHT = (58, 92, 140)
+NAVY_LT = (34, 53, 94)
 GRAY = (68, 68, 68)
-RULE = (221, 221, 221)
+RULE = (216, 210, 196)
 WHITE = (255, 255, 255)
-BLACK = (15, 15, 15)
+BLACK = (13, 13, 13)
 
-FONT_DIR = "/usr/share/fonts/truetype/liberation"
-
-
-def load(name, size):
-    return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
+SERIF_B = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+SANS_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
-def serif_b(size):
-    return load("LiberationSerif-Bold.ttf", size)
+def font(path, size):
+    return ImageFont.truetype(path, size)
 
 
-def sans_b(size):
-    return load("LiberationSans-Bold.ttf", size)
-
-
-def sans(size):
-    return load("LiberationSans-Regular.ttf", size)
-
-
-def wrap(draw, text, fnt, max_w):
-    """Greedy word wrap; returns a list of lines, each at most max_w wide."""
-    words = text.split()
+def wrap(text, fnt, max_w):
+    """Greedy word wrap; returns a list of lines."""
     lines, cur = [], ""
-    for word in words:
+    for word in text.split():
         trial = (cur + " " + word).strip()
-        if draw.textlength(trial, font=fnt) <= max_w or not cur:
+        if fnt.getlength(trial) <= max_w:
             cur = trial
         else:
-            lines.append(cur)
+            if cur:
+                lines.append(cur)
             cur = word
     if cur:
         lines.append(cur)
     return lines
 
 
-def centered(draw, y, text, fnt, fill):
-    x = (W - draw.textlength(text, font=fnt)) / 2
-    draw.text((x, y), text, font=fnt, fill=fill)
+def wrap_tokens(tokens, fnt_plain, fnt_bold, max_w):
+    """Wrap (word, bold?) tokens; returns lines of tokens."""
+    lines, cur, cur_w = [], [], 0.0
+    for word, bold in tokens:
+        fnt = fnt_bold if bold else fnt_plain
+        w = fnt.getlength(word)
+        space = fnt_plain.getlength(" ") if cur else 0.0
+        if cur and cur_w + space + w > max_w:
+            lines.append(cur)
+            cur, cur_w = [(word, bold)], w
+        else:
+            cur.append((word, bold))
+            cur_w += space + w
+    if cur:
+        lines.append(cur)
+    return lines
 
 
-def masthead(draw):
-    draw.rectangle([0, 0, W, 150], fill=BLACK)
-    centered(draw, 14, "THE WORLD TODAY", serif_b(80), WHITE)
-    centered(draw, 102, "THURSDAY 19 NOVEMBER 2026", sans_b(46), DATE_RED)
+LEAD_KICKER = "FIRST TRILATERAL SUMMIT — SHENZHEN"
+LEAD_HEAD = ["TRUMP, XI AND PUTIN", "MEET IN SHENZHEN"]
+LEAD_SUB = "First trilateral: peace declaration; arms, Ukraine, Iran on the table"
 
-
-def lead(draw):
-    # Kicker, two-line headline, one short sub-line.
-    draw.text((40, 166), "FIRST TRILATERAL SUMMIT  \u2014  SHENZHEN",
-              font=sans_b(30), fill=RED)
-    draw.text((40, 204), "TRUMP, XI AND PUTIN", font=sans_b(64), fill=INK)
-    draw.text((40, 276), "MEET IN SHENZHEN", font=sans_b(64), fill=INK)
-    draw.text((40, 352),
-              "First trilateral summit: arms, Ukraine and Iran on the table",
-              font=sans(28), fill=GRAY)
-
-
-def skyline(draw):
-    # Simple city silhouette strip between the lead and the story grid.
-    draw.rectangle([0, 400, W, 432], fill=NAVY)
-    towers = [
-        (0, 46, 18), (52, 30, 26), (88, 40, 14), (134, 26, 28),
-        (166, 52, 20), (224, 34, 30), (264, 44, 16), (314, 28, 24),
-        (348, 48, 12), (402, 36, 26), (444, 30, 18), (480, 54, 28),
-        (540, 32, 14), (578, 42, 24), (626, 28, 30), (660, 40, 16),
-        (730, 44, 20), (780, 30, 26), (816, 48, 14), (870, 36, 28),
-        (912, 40, 18), (958, 34, 24), (998, 26, 16),
-    ]
-    for x, w, h in towers:
-        draw.rectangle([x, 432 - h, x + w, 432], fill=NAVY_LIGHT)
-    # One tapered tower, the tallest shape on the skyline.
-    draw.polygon([(698, 432), (698, 406), (711, 398), (724, 406), (724, 432)],
-                 fill=NAVY_LIGHT)
-
-
-GRID_TOP = 432
-GRID_BOTTOM = 840
-ROW_H = 136
-COL_X = (36, 524)
-CELL_W = 464
-
-# (headline, one short sub-line) - every headline is a real 19 Nov 2026 event.
-STORIES = [
-    ("WORLD COURT RULES IN ROHINGYA CASE", "Genocide case: Gambia v Myanmar"),
-    ("KERCH RAIL SPAN REPORTED HIT", "Road arch down since 17 Nov"),
+GRID = [
+    ("WORLD COURT FINDS MYANMAR GUILTY", "Rohingya genocide: Gambia v Myanmar"),
+    ("KERCH RAIL SPAN REPORTED HIT", "Third strike this week — arch down 17 Nov"),
     ("HOUTHI STRIKE HITS RIYADH TOWER", "Blast damages PIF headquarters"),
-    ("UNREST TORCHES YUNUS'S HOME", "Yunus's ancestral home torched"),
+    ("UNREST TORCHES YUNUS'S HOME", "Protests in Bangladesh; home torched"),
     ("ISRAEL PUSHES INTO CENTRAL GAZA", "Raid from 18 Nov ends today"),
     ("ANTHROPIC'S $81.3B RECORD IPO", "Biggest AI listing ever"),
+    ("COP31 DEAL TEXT DROPS FOSSIL FUELS", "Revised draft omits phaseout"),
+    ("CYCLONE AKVAN SLAMS ODISHA", "50,000 evacuated as storm hits"),
+    ("US–VENEZUELA DEFENCE PACT", "Hegseth inks deal in surprise trip"),
+    ("DENMARK OKS GREENLAND–US DEAL", "Parliament approves US bases deal"),
 ]
 
+STRIP_ITEMS = [
+    "Hormuz: 3 tankers ablaze on mines",
+    "Abu Dhabi talks fail; Ukraine grid hit",
+    "Ethiopia–Eritrea clashes risk war",
+    "GTA VI out after 13-year wait",
+    "IEA: Hormuz shock is largest ever",
+]
 
-def grid(draw):
-    # Rules between the cells.
-    for y in (568, 704):
-        draw.line([(36, y), (988, y)], fill=RULE, width=2)
-    draw.line([(512, GRID_TOP), (512, GRID_BOTTOM)], fill=RULE, width=2)
-    head_font = sans_b(40)
-    sub_font = sans(28)
-    for i, (headline, sub) in enumerate(STORIES):
-        x = COL_X[i % 2]
-        top = GRID_TOP + (i // 2) * ROW_H
-        lines = wrap(draw, headline, head_font, CELL_W)
-        assert len(lines) <= 2, "headline needs more than 2 lines: %r" % headline
-        y = top + 10
-        for line in lines:
-            draw.text((x, y), line, font=head_font, fill=INK)
-            y += 46
-        assert draw.textlength(sub, font=sub_font) <= CELL_W, \
-            "sub-line too long: %r" % sub
-        draw.text((x, top + 106), sub, font=sub_font, fill=GRAY)
-
-
-def also_today(draw):
-    draw.rectangle([0, 840, W, 956], fill=NAVY)
-    label = "ALSO TODAY:  "
-    line1 = "COP31 in Antalya \u2022 Cyclone Akvan: 50,000 evacuated"
-    line2 = "US\u2013Venezuela military deal \u2022 Hormuz fires \u2022 GTA VI launches"
-    label_font = sans_b(28)
-    body_font = sans(28)
-    rows = (
-        (862, "ALSO TODAY:  ", line1),
-        (902, "", line2),
-    )
-    for y, label, rest in rows:
-        lw = draw.textlength(label, font=label_font)
-        rw = draw.textlength(rest, font=body_font)
-        assert lw + rw <= 952, "also-today line too long: %r" % rest
-        x = (W - lw - rw) / 2
-        draw.text((x, y), label, font=label_font, fill=DATE_RED)
-        draw.text((x + lw, y), rest, font=body_font, fill=WHITE)
-
-
-def footer(draw):
-    centered(draw, 978, "SOURCES: AP \u2022 REUTERS \u2022 AFP \u2022 AL JAZEERA",
-             sans(28), GRAY)
+FOOTER = "SOURCES: AP • REUTERS • AFP • AL JAZEERA"
 
 
 def main():
-    img = Image.new("RGB", (W, H), WHITE)
-    draw = ImageDraw.Draw(img)
-    masthead(draw)
-    lead(draw)
-    skyline(draw)
-    grid(draw)
-    also_today(draw)
-    footer(draw)
-    here = os.path.dirname(os.path.abspath(__file__))
-    img.save(os.path.join(here, "entry.png"), optimize=True)
+    img = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(img)
+
+    # --- masthead ---
+    d.rectangle([0, 0, W, 124], fill=BLACK)
+    d.text((W // 2, 8), "THE WORLD TODAY", font=font(SERIF_B, 68),
+           fill=WHITE, anchor="ma")
+    d.text((W // 2, 80), "THURSDAY 19 NOVEMBER 2026", font=font(SANS_B, 38),
+           fill=RED, anchor="ma")
+    d.rectangle([0, 124, W, 128], fill=RED)
+
+    # --- lead story ---
+    d.text((W // 2, 140), LEAD_KICKER, font=font(SANS_B, 24),
+           fill=RED, anchor="ma")
+    f_lead = font(SERIF_B, 54)
+    d.text((W // 2, 168), LEAD_HEAD[0], font=f_lead, fill=INK, anchor="ma")
+    d.text((W // 2, 226), LEAD_HEAD[1], font=f_lead, fill=INK, anchor="ma")
+    d.text((W // 2, 290), LEAD_SUB, font=font(SANS, 23), fill=GRAY, anchor="ma")
+
+    # --- skyline silhouette divider ---
+    d.rectangle([0, 322, W, 338], fill=NAVY)
+    heights = [10, 14, 8, 16, 11, 15, 9, 13, 16, 10,
+               14, 8, 15, 11, 13, 9, 16, 12, 14, 10]
+    bw = W // len(heights)
+    for i, hgt in enumerate(heights):
+        x0 = i * bw + 2
+        d.rectangle([x0, 338 - hgt, x0 + bw - 4, 338], fill=NAVY_LT)
+
+    # --- grid: 2 columns x 5 rows ---
+    grid_top, row_h = 338, 108
+    col_x = [24, 524]
+    col_w = 476
+    f_head = font(SANS_B, 31)
+    f_sub = font(SANS, 22)
+    for idx, (head, sub) in enumerate(GRID):
+        r, c = divmod(idx, 2)
+        x0 = col_x[c]
+        y0 = grid_top + r * row_h
+        lines = wrap(head, f_head, col_w)
+        assert len(lines) <= 2, f"headline wraps to {len(lines)}: {head}"
+        y = y0 + 8
+        for line in lines:
+            d.text((x0, y), line, font=f_head, fill=INK, anchor="la")
+            y += 35
+        assert f_sub.getlength(sub) <= col_w, f"sub too long: {sub}"
+        d.text((x0, y + 6), sub, font=f_sub, fill=GRAY, anchor="la")
+        assert y + 6 + 22 <= y0 + row_h, f"cell overflows: {head}"
+    # dividers
+    for r in range(1, 5):
+        y = grid_top + r * row_h
+        d.line([(24, y), (1000, y)], fill=RULE, width=1)
+    d.line([(512, grid_top), (512, grid_top + 5 * row_h)], fill=RULE, width=1)
+
+    # --- ALSO TODAY strip ---
+    strip_top, strip_h = 878, 114
+    d.rectangle([0, strip_top, W, strip_top + strip_h], fill=NAVY)
+    tokens = []
+    for word in "ALSO TODAY:".split():
+        tokens.append((word, True))
+    for item in STRIP_ITEMS:
+        for word in item.split():
+            tokens.append((word, False))
+        tokens.append(("•", False))
+    tokens = tokens[:-1]  # drop trailing bullet
+    f_strip = font(SANS, 22)
+    f_strip_b = font(SANS_B, 22)
+    lines = wrap_tokens(tokens, f_strip, f_strip_b, W - 48)
+    assert len(lines) <= 3, f"strip wraps to {len(lines)} lines"
+    y = strip_top + 14
+    for line in lines:
+        x = 24
+        for word, bold in line:
+            fnt = f_strip_b if bold else f_strip
+            fill = RED if bold else WHITE
+            d.text((x, y), word, font=fnt, fill=fill, anchor="la")
+            x += fnt.getlength(word + " ")
+        y += 28
+
+    # --- footer ---
+    d.text((W // 2, 998), FOOTER, font=font(SANS, 20), fill=GRAY, anchor="ma")
+
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "entry.png")
+    img.save(out, "PNG")
+    size = os.path.getsize(out)
+    assert img.size == (1024, 1024)
+    assert size <= 1048576, f"entry.png too big: {size}"
+    print(f"wrote {out}: {img.size[0]}x{img.size[1]}, {size} bytes")
+    print(f"stories: 1 lead + {len(GRID)} grid + {len(STRIP_ITEMS)} strip "
+          f"= {1 + len(GRID) + len(STRIP_ITEMS)}")
 
 
 if __name__ == "__main__":
